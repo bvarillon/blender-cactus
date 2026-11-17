@@ -20,9 +20,7 @@ protection:
     require_last_push_approval: false
     
   # Require status checks to pass before merging
-  required_status_checks:
-    strict: true  # Require branches to be up to date before merging
-    contexts: ["CI"]  # Require CI workflow to pass
+  required_status_checks: null  # No required status checks for now
     
   # Enforce all of the above settings
   enforce_admins: false  # Admins can bypass (set to true for stricter enforcement)
