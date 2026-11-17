@@ -3,8 +3,11 @@ name: Auto Version & Release
 on:
   push:
     branches: [main]
-    # Only run after PR merge, not on direct pushes
-    # The protect-main workflow will block direct pushes
+
+permissions:
+  contents: write
+  pull-requests: read
+  repository-projects: read
 
 jobs:
   determine-version:
@@ -15,17 +18,13 @@ jobs:
       bump_type: ${{ steps.determine_version.outputs.bump_type }}
       new_version: ${{ steps.determine_version.outputs.new_version }}
       tag_name: ${{ steps.determine_version.outputs.tag_name }}
+      should_release: ${{ steps.determine_version.outputs.should_release }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Get latest tag
         id: get_tag
@@ -61,42 +60,52 @@ jobs:
             COMMITS=$(git log ${{ steps.get_tag.outputs.latest_tag }}..HEAD --pretty=format:"%s" --no-merges)
           fi
           
+          # Remove empty lines
+          COMMITS=$(echo "$COMMITS" | grep -v "^$")
+          
           echo "Commits since last tag:"
           echo "$COMMITS"
           echo "commits=$COMMITS" >> $GITHUB_OUTPUT
+          
+          # Count commits
+          COMMIT_COUNT=$(echo "$COMMITS" | grep -c . || echo "0")
+          echo "commit_count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
 
       - name: Determine version bump type
         id: determine_version
         run: |
           COMMITS="${{ steps.get_commits.outputs.commits }}"
+          COMMIT_COUNT="${{ steps.get_commits.outputs.commit_count }}"
           MAJOR=${{ steps.get_tag.outputs.major }}
           MINOR=${{ steps.get_tag.outputs.minor }}
           PATCH=${{ steps.get_tag.outputs.patch }}
           
+          echo "Analyzing $COMMIT_COUNT commits for version bump..."
+          
           BUMP_TYPE="none"
           
           # Check for breaking changes
-          if echo "$COMMITS" | grep -qi "BREAKING CHANGE\|!"; then
+          if echo "$COMMITS" | grep -qiE "BREAKING CHANGE|!"; then
             BUMP_TYPE="major"
+            echo "Detected BREAKING CHANGE - MAJOR bump"
           fi
           
           # Check for features (if no breaking change already found)
-          if [ "$BUMP_TYPE" = "none" ] && echo "$COMMITS" | grep -qi "^feat:"; then
+          if [ "$BUMP_TYPE" = "none" ] && echo "$COMMITS" | grep -qiE "^feat\(:"; then
             BUMP_TYPE="minor"
+            echo "Detected feat: - MINOR bump"
           fi
           
           # Check for fixes (if no breaking change or feature found)
-          if [ "$BUMP_TYPE" = "none" ] && echo "$COMMITS" | grep -qi "^fix:"; then
+          if [ "$BUMP_TYPE" = "none" ] && echo "$COMMITS" | grep -qiE "^fix\(:"; then
             BUMP_TYPE="patch"
+            echo "Detected fix: - PATCH bump"
           fi
           
           # If still none, check for any other changes
-          if [ "$BUMP_TYPE" = "none" ]; then
-            # Count non-merge commits
-            COMMIT_COUNT=$(echo "$COMMITS" | grep -c .)
-            if [ "$COMMIT_COUNT" -gt 0 ]; then
-              BUMP_TYPE="patch"
-            fi
+          if [ "$BUMP_TYPE" = "none" ] && [ "$COMMIT_COUNT" -gt 0 ]; then
+            BUMP_TYPE="patch"
+            echo "No specific type detected - default PATCH bump"
           fi
           
           echo "Bump type: $BUMP_TYPE"
@@ -121,17 +130,27 @@ jobs:
             NEW_PATCH=$PATCH
           fi
           
-          NEW_VERSION="v${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+          NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+          TAG_NAME="v${NEW_VERSION}"
+          
           echo "New version: $NEW_VERSION"
+          echo "Tag name: $TAG_NAME"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag_name=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "version=${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Should we release?
+          if [ "$BUMP_TYPE" != "none" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
 
   create-release:
     name: Create Git Tag and Release
     runs-on: ubuntu-latest
     needs: determine-version
-    if: needs.determine-version.outputs.bump_type != 'none'
+    if: needs.determine-version.outputs.should_release == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -148,89 +167,82 @@ jobs:
         id: create_tag
         run: |
           TAG_NAME=${{ needs.determine-version.outputs.tag_name }}
-          echo "Creating tag: $TAG_NAME"
+          VERSION=${{ needs.determine-version.outputs.version }}
+          BUMP_TYPE=${{ needs.determine-version.outputs.bump_type }}
+          
+          echo "Creating tag: $TAG_NAME (bump: $BUMP_TYPE)"
+          
+          # Create annotated tag
           git tag -a $TAG_NAME -m "Release $TAG_NAME"
+          
+          # Push tag to remote
           git push origin $TAG_NAME
+          
+          echo "Tag $TAG_NAME pushed successfully"
           echo "tag_created=true" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         if: steps.create_tag.outputs.tag_created == 'true'
-        uses: actions/github-script@v7
         with:
-          script: |
-            const tagName = '${{ needs.determine-version.outputs.tag_name }}';
-            const version = '${{ needs.determine-version.outputs.version }}';
-            const bumpType = '${{ needs.determine-version.outputs.bump_type }}';
+          tag_name: ${{ needs.determine-version.outputs.tag_name }}
+          name: Release ${{ needs.determine-version.outputs.tag_name }}
+          body: |
+            ## What's Changed
             
-            const releaseName = `Release ${tagName}`;
-            const body = `## What's Changed
-
-Automatic release based on commit types:
-- **${bumpType.toUpperCase()}**: Version bumped to ${version}
-
-Version: ${version}
-Bump Type: ${bumpType}
-
-Generated by GitHub Actions`;
+            Automatic release based on commit types.
             
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: tagName,
-              name: releaseName,
-              body: body,
-              draft: false,
-              prerelease: false
-            });
+            - **Version**: ${{ needs.determine-version.outputs.version }}
+            - **Bump Type**: ${{ needs.determine-version.outputs.bump_type }}
+            
+            ### Version Bump Rules
+            - `feat:` → MINOR version bump
+            - `fix:` → PATCH version bump  
+            - `BREAKING CHANGE:` or `!` → MAJOR version bump
+            
+            Generated by GitHub Actions
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update-version-files:
     name: Update Version in pyproject.toml
     runs-on: ubuntu-latest
     needs: [determine-version, create-release]
-    if: needs.determine-version.outputs.bump_type != 'none' && success()
+    if: needs.determine-version.outputs.should_release == 'true' && success()
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Update version in pyproject.toml files
-        run: |
-          NEW_VERSION=${{ needs.determine-version.outputs.version }}
-          
-          # Update root pyproject.toml fallback version
-          if [ -f pyproject.toml ]; then
-            # Use sed to update fallback-version
-            sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" pyproject.toml
-            # Update version in project if not dynamic
-            sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/g" pyproject.toml
-          fi
-          
-          # Update cactus-tools/pyproject.toml
-          if [ -f cactus-tools/pyproject.toml ]; then
-            sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" cactus-tools/pyproject.toml
-          fi
-          
-          # Update cactus-server/pyproject.toml
-          if [ -f cactus-server/pyproject.toml ]; then
-            sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" cactus-server/pyproject.toml
-          fi
-          
-          # Update cactus-worker/pyproject.toml
-          if [ -f cactus-worker/pyproject.toml ]; then
-            sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" cactus-worker/pyproject.toml
-          fi
-
-      - name: Commit version updates
+      - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update fallback versions
+        run: |
+          NEW_VERSION=${{ needs.determine-version.outputs.version }}
           
+          echo "Updating fallback versions to $NEW_VERSION"
+          
+          # Update root pyproject.toml
+          if [ -f pyproject.toml ]; then
+            sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" pyproject.toml
+          fi
+          
+          # Update module pyproject.toml files
+          for module in cactus-tools cactus-server cactus-worker; do
+            if [ -f $module/pyproject.toml ]; then
+              sed -i "s/fallback-version = \"[0-9]*\.[0-9]*\.[0-9]*\"/fallback-version = \"$NEW_VERSION\"/g" $module/pyproject.toml
+            fi
+          done
+
+      - name: Commit version updates
+        run: |
           git add pyproject.toml cactus-tools/pyproject.toml cactus-server/pyproject.toml cactus-worker/pyproject.toml
-          git commit -m "chore: Update version to ${{ needs.determine-version.outputs.version }} [skip ci]"
+          git diff --cached --quiet || git commit -m "chore: Update fallback versions to ${{ needs.determine-version.outputs.version }} [skip ci]"
           git push origin main

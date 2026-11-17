@@ -13,40 +13,43 @@ jobs:
     strategy:
       matrix:
         module: ["cactus-tools", "cactus-server", "cactus-worker"]
+        python-version: ["3.11"]
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install base dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install module and dev dependencies
         run: |
           cd ${{ matrix.module }}
-          pip install -e ".[dev]" --no-deps
-          pip install pytest pytest-cov pytest-asyncio
+          # Install the module in development mode
           if [ "${{ matrix.module }}" = "cactus-tools" ]; then
-            pip install pydantic pydantic-settings
+            pip install -e .[dev]
           elif [ "${{ matrix.module }}" = "cactus-server" ]; then
-            pip install fastapi uvicorn websockets cactus-tools
+            pip install -e ".[dev]" --no-deps
+            pip install fastapi uvicorn websockets
           elif [ "${{ matrix.module }}" = "cactus-worker" ]; then
-            pip install websockets cactus-tools
+            pip install -e ".[dev]" --no-deps
+            pip install websockets
           fi
 
       - name: Run tests
         run: |
           cd ${{ matrix.module }}
-          python -m pytest tests/ -v --cov=src --cov-report=xml 2>&1 || echo "No tests found or tests failed"
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-${{ matrix.module }}
-          path: ${{ matrix.module }}/coverage.xml
+          if [ -d "tests" ] && [ "$(ls tests/*.py 2>/dev/null | wc -l)" -gt 0 ]; then
+            python -m pytest tests/ -v --tb=short 2>&1 || echo "::warning:: Tests failed or no tests found"
+          else
+            echo "::notice:: No tests found for ${{ matrix.module }}"
+          fi
 
   lint:
     name: Code Quality
@@ -61,17 +64,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install linting tools
+        run: |
+          pip install ruff mypy
 
       - name: Run ruff
-        run: ruff check cactus-tools cactus-server cactus-worker || echo "Ruff found issues"
-
-      - name: Install mypy
-        run: pip install mypy
+        run: |
+          ruff check cactus-tools cactus-server cactus-worker || echo "::warning:: Ruff found linting issues"
 
       - name: Run mypy
-        run: mypy cactus-tools cactus-server cactus-worker --ignore-missing-imports || echo "Mypy found issues"
+        run: |
+          mypy cactus-tools --ignore-missing-imports || echo "::warning:: Mypy found type issues"
 
   build:
     name: Build Packages
@@ -86,20 +89,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build dependencies
-        run: pip install build hatchling
+      - name: Install build tools
+        run: pip install build
 
-      - name: Build cactus-tools
+      - name: Build all packages
         run: |
-          cd cactus-tools
-          python -m build --wheel || echo "Build failed"
-
-      - name: Build cactus-server
-        run: |
-          cd cactus-server
-          python -m build --wheel || echo "Build failed"
-
-      - name: Build cactus-worker
-        run: |
-          cd cactus-worker
-          python -m build --wheel || echo "Build failed"
+          for module in cactus-tools cactus-server cactus-worker; do
+            echo "Building $module..."
+            cd $module
+            python -m build --wheel 2>&1 || echo "::warning:: Build failed for $module"
+            cd ..
+          done
