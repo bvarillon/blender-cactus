@@ -31,8 +31,11 @@ all = [
 members = ["cactus-tools", "cactus-server", "cactus-worker"]
 
 [build-system]
-requires = ["uv>=0.1.0"]
-build-backend = "uv_build"
+requires = ["hatchling", "uv>=0.1.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = []
 
 [tool.uv]
 package = true
