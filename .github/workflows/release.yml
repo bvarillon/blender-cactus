@@ -5,9 +5,6 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
   release:
     name: Create Release
@@ -15,15 +12,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Conventional Release
         id: automatic_versioning
         uses: onesoft-sudo/conventional-release-action@v1.8.0
         with:
           create-tag-prefix: 'v'
-          allowed-commit-types: 'feat,fix,perf,revert,docs,style,refactor,test,build,ci,chore'
 
       - name: Create Release
         uses: ncipollo/release-action@v1
@@ -32,7 +26,3 @@ jobs:
           tag: ${{ steps.automatic_versioning.outputs.tag }}
           name: Release ${{ steps.automatic_versioning.outputs.tag }}
           body: ${{ steps.automatic_versioning.outputs.release_notes }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
