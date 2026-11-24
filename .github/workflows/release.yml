@@ -14,16 +14,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Conventional Release
-        id: automatic_versioning
-        uses: onesoft-sudo/conventional-release-action@v1.8.0
-        with:
-          create-tag-prefix: 'v'
+      # - name: Conventional Release
+      #   id: automatic_versioning
+      #   uses: onesoft-sudo/conventional-release-action@v1.8.0
+      #   with:
+      #     create-tag-prefix: 'v'
+      - name: Increment version
+        id: increment-version
+        uses: RichardInnocent/semantic-versioning-git@v0.0.1
 
+      # - name: Create Release
+      #   uses: ncipollo/release-action@v1
+      #   if: ${{ steps.automatic_versioning.outputs.tag != '' }}
+      #   with:
+      #     tag: ${{ steps.automatic_versioning.outputs.tag }}
+      #     name: Release ${{ steps.automatic_versioning.outputs.tag }}
+      #     body: ${{ steps.automatic_versioning.outputs.release_notes }}
+      
+      - name: Print if version changed
+        if: steps.increment-version.outputs.previous-version != steps.increment-version.outputs.new-version
+        run: echo "The new version is now $new_version"
+        env:
+          new_version: ${{ steps.increment-version.outputs.new-version }}
+          
       - name: Create Release
         uses: ncipollo/release-action@v1
-        if: ${{ steps.automatic_versioning.outputs.tag != '' }}
+        if: ${{ steps.increment-version.outputs.new-version != '' }}
         with:
-          tag: ${{ steps.automatic_versioning.outputs.tag }}
-          name: Release ${{ steps.automatic_versioning.outputs.tag }}
-          body: ${{ steps.automatic_versioning.outputs.release_notes }}
+          tag: ${{ steps.increment-version.outputs.new-version }}
+          name: Release ${{ steps.increment-version.outputs.new-version }}
