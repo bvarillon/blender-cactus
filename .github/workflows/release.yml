@@ -23,7 +23,7 @@ jobs:
       #     create-tag-prefix: 'v'
       - name: Increment version
         id: increment-version
-        uses: RichardInnocent/semantic-versioning-git@v0.0.1
+        uses: RichardInnocent/semantic-versioning-git@v0.0.2
 
       # - name: Create Release
       #   uses: ncipollo/release-action@v1
