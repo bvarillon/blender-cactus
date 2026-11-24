@@ -43,5 +43,5 @@ jobs:
         uses: ncipollo/release-action@v1
         if: ${{ steps.increment-version.outputs.new-version != '' }}
         with:
-          tag: ${{ steps.increment-version.outputs.new-version }}
+          tag: v${{ steps.increment-version.outputs.new-version }}
           name: Release ${{ steps.increment-version.outputs.new-version }}
