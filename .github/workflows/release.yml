@@ -16,19 +16,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Increment version
+      # - name: Increment version
+      #   id: increment-version
+      #   uses: RichardInnocent/semantic-versioning-git@v0.0.2
+      - name: Compute version
         id: increment-version
-        uses: RichardInnocent/semantic-versioning-git@v0.0.2
-      
-      - name: Print if version changed
-        if: steps.increment-version.outputs.previous-version != steps.increment-version.outputs.new-version
-        run: echo "The new version is now $new_version"
-        env:
-          new_version: ${{ steps.increment-version.outputs.new-version }}
+        uses: bitshifted/git-auto-semver@v2
           
       - name: Create Release
         uses: ncipollo/release-action@v1
-        if: ${{ steps.increment-version.outputs.new-version != '' }}
+        # if: ${{ steps.increment-version.outputs.new-version != '' }}
+        if: ${{ steps.increment-version.outputs.version-string != '' }}
         with:
-          tag: v${{ steps.increment-version.outputs.new-version }}
-          name: Release ${{ steps.increment-version.outputs.new-version }}
+          # tag: v${{ steps.increment-version.outputs.new-version }}
+          # name: Release ${{ steps.increment-version.outputs.new-version }}
+          tag: v${{ steps.increment-version.outputs.version-string }}
+          name: Release ${{ steps.increment-version.outputs.version-string }}
