@@ -22,12 +22,6 @@ jobs:
       - name: Compute version
         id: increment-version
         uses: bitshifted/git-auto-semver@v2
-      
-      # - name: Print if version changed
-      #   if: steps.increment-version.outputs.previous-version != steps.increment-version.outputs.new-version
-      #   run: echo "The new version is now $new_version"
-      #   env:
-      #     new_version: ${{ steps.increment-version.outputs.new-version }}
           
       - name: Create Release
         uses: ncipollo/release-action@v1
